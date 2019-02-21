@@ -14,7 +14,7 @@ function Dat=PeakPicking(Rsp,Cvr,Asc,IsPrd,NEP,RspLbl,CvrLbl)
 
 validateattributes(Rsp, {'numeric'},{'vector'},'PeakPick','Y',1);
 n=numel(Rsp);  %number of observations
-validateattributes(Cvr, {'numeric'},{'nrows',n,'<=',360,'>=',0},'PeakPick','Thet',2);
+validateattributes(Cvr, {'numeric'},{'nrows',n},'PeakPick','Thet',2);
 nCvr=size(Cvr,2);
 validateattributes(Asc, {'numeric'},{'nrows',n},'PeakPick','Asc',3);
 validateattributes(IsPrd, {'numeric','logical'},{'numel',nCvr,'integer'},'PeakPick','IsPrd',4);
@@ -90,6 +90,7 @@ for i=1:nDmn
             plot(Cvr(:,iC),Asc(:,i-1),'.','color',[1,1,1].*0.7);
         end
         hold on
+        grid on
         plot( Dat.X(:,iC),Dat.Y(:,i),'k.');        
         xlabel(CvrLbl{iC})        
         axis tight
@@ -110,6 +111,7 @@ if nDmn>1
         subplot(1,nAsc,iA);
         plot(Rsp,Asc(:,iA),'.','color',[1,1,1].*0.7);
         hold on
+        grid on
         plot( Dat.Y(:,1),Dat.Y(:,iA+1),'k.');
         xlabel(RspLbl{1})
         ylabel(RspLbl{iA+1})

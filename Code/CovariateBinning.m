@@ -90,7 +90,7 @@ classdef CovariateBinning
                     if any(Bn.Edg{iC}>360) || any(Bn.Edg{iC}<0)
                         error('Periodic Edg{%g} expected on range [0,360]',iC);
                     end
-                    if numel(unique(mod(Bn.Edg{iC},360))) < numel(Bn.Edg)
+                    if numel(unique(mod(Bn.Edg{iC},360))) < numel(Bn.Edg{iC})
                         error('You have supplied 2 bin edges which correspond to same point on a circle. For a single bin, please provide 1D DrcEdg (any value will do). For 2 bins, please provide 2D DrcEdg containing values which differ on 360deg circle.');
                     end
                     Bn.nBinCvr(iC)=numel(Bn.Edg{iC}); %number of bins
@@ -102,7 +102,7 @@ classdef CovariateBinning
                 else %non periodic
                     Bn.EdgExd{iC}=Bn.Edg{iC};
                     Bn.nBinCvr(iC)=numel(Bn.Edg{iC})-1; %number of bins
-                    if any(X(:,iC)<Bn.Edg{iC}(1) || X(:,iC)>Bn.Edg{iC}(end))
+                    if any(X(:,iC)<Bn.Edg{iC}(1) | X(:,iC)>Bn.Edg{iC}(end))
                         error('Non Periodic X(:,%g) outside of range defined by bins',iC)
                     end
                 end
@@ -172,6 +172,7 @@ classdef CovariateBinning
             Bn.Cnt=accumarray(Bn.A,Bn.A,[Bn.nBin,1],@numel); %
             if any(Bn.Cnt < 30)
                 warning('Too few exceedances in one or more bins. Consider reducing number of bins.');
+                Bn.Cnt
             end
         end %BinAllocation
         
@@ -190,6 +191,7 @@ classdef CovariateBinning
                     plot(X(:,iC),Y(:,i),'k.')
                     axis tight
                     hold on
+                    grid on
                     plot(repmat(Bn.Edg{iC},1,2)',ylim,'r--','linewidth',2)
                     xlabel(Bn.CvrLbl{iC})
                     if Bn.IsPrd(iC)
@@ -205,14 +207,19 @@ classdef CovariateBinning
             for iD=2:nDmn                                                    
                 figure(iD+1)    
                 clf;
-                for iC=1:Bn.nBin                    
-                    subplot(2,ceil(Bn.nBin/2),iC)
+                for iC=1:Bn.nBin 
+                    if Bn.nBin > 1  %if more than one bin, use subplots
+                        subplot(2,ceil(Bn.nBin/2),iC)
+                    end
                     plot(Y(Bn.A==iC,1),Y(Bn.A==iC,iD),'k.')
                     axis tight
                     hold on
+                    grid on
                     xlabel(Bn.RspLbl{1})
                     ylabel(Bn.RspLbl{iD})
-                    title(Bn.BinLbl{iC})
+                    if Bn.nBin > 1
+                        title(Bn.BinLbl{iC})
+                    end
                 end
                 savePics(sprintf('Figures/Stg2_Data_BinScatterPlot_Y%g_Y1',iD))
             end        
@@ -257,6 +264,8 @@ classdef CovariateBinning
             
             if Bn.IsPrd(iC)
                tX=mod(X,360); 
+            else
+                tX=X;
             end
                      
             %find indices of directions X which fall in each directional bin

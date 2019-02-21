@@ -18,7 +18,7 @@ classdef MarginalModel
         RspLbl      %1 x 1, (string), reponse label
         RspSavLbl   %1 x 1 (string), reponse label for saving plots (Aviod special characters)
         CvrLbl      %nCvr x 1, (string), covariate label vecotr
-        nB=100;  %1 x 1, number of bootstrap resesamples
+        nBoot=100;  %1 x 1, number of bootstrap resesamples
         RtrPrd=100; %nRtr x 1 Return Period  in years
         
         %% Parameters
@@ -26,14 +26,13 @@ classdef MarginalModel
         Scl      %nBin x 1, Fitted Generalised Paraeto Scale nBin x nB
         Shp      %1 x nBoot, Fitted Generalised Paraeto Shape (stationary shape from PPC marginal fitting)
         %nBin x nBoot (nonstationary shape)
-        Alp      %nBin x nBoot   gamma parameter
-        Bet      %nBin x nBoot   gamma parameter
+        Omg      %nBin x nBoot   gamma shape parameter
+        Kpp      %nBin x nBoot   gamma scale parameter
         GmmLct
         
         NEP      %nBoot x 1, Non Exceedence Probability Quantile threshold
         Thr      %nBin x 1, Extreme value threshold nBin x nB
-        RatExc   %nBin x nBoot, count no. exceedence observations in each bin nBin x nB
-        RatBlw   %nBin x nBoot, count no. non-exceedence observations in each bin nBin x nB
+        Rat      %nBin x nBoot, count no. exceedence observations in each bin nBin x nB        
         BSInd    %nDat x nBoot, bootstrap index;
         
         nCvr      % 1 x 1, number of covariates
@@ -124,12 +123,12 @@ classdef MarginalModel
             %% Optional inputs
             if nargin>=5
                 validateattributes(nB, {'numeric'},{'scalar','nonnegative'},'MarginalModel','nB',5);
-                MM.nB=nB;  %number of bootstraps
-                if MM.nB==0  %case where bootstrapping is off!!
-                    MM.nB=1;
+                MM.nBoot=nB;  %number of bootstraps
+                if MM.nBoot==0  %case where bootstrapping is off!!
+                    MM.nBoot=1;
                 end
             end
-            MM.NEP = [range(NEP)/2+min(NEP) ;sort(rand(MM.nB-1,1)).*range(NEP)+min(NEP)];  %sample NEPs over range with middle of range first
+            MM.NEP = [range(NEP)/2+min(NEP) ;sort(rand(MM.nBoot-1,1)).*range(NEP)+min(NEP)];  %sample NEPs over range with middle of range first
             if nargin>=6
                 validateattributes(Yrs, {'numeric'},{'scalar','positive'},'MarginalModel','Yrs',6);
                 MM.Yrs=Yrs;
@@ -171,17 +170,16 @@ classdef MarginalModel
             
             
             %% Preallocate Output Arrays
-            MM.Scl=NaN(MM.Bn.nBin,MM.nB);  %Fitted Generalised Pareto Scale nBin x nB
-            MM.Shp=NaN(MM.nB,1);    %Fitted Generalised Paraeto Shape  1 x nB
-            MM.Alp=NaN(MM.Bn.nBin,MM.nB); %Gamma Parameter
-            MM.Bet=NaN(MM.Bn.nBin,MM.nB); %Gamma Parameter nBin x nB
+            MM.Scl=NaN(MM.Bn.nBin,MM.nBoot);  %Fitted Generalised Pareto Scale nBin x nB
+            MM.Shp=NaN(MM.nBoot,1);    %Fitted Generalised Paraeto Shape  1 x nB
+            MM.Omg=NaN(MM.Bn.nBin,MM.nBoot); %Gamma Parameter nBin x nB
+            MM.Kpp=NaN(MM.Bn.nBin,MM.nBoot); %Gamma Parameter nBin x nB
             MM.GmmLct=NaN(MM.Bn.nBin,1); %Gamma Location Parameter nBin x 1
-            MM.Thr=NaN(MM.Bn.nBin,MM.nB); %Extreme value threshold nBin x nB
-            MM.RatExc=NaN(MM.Bn.nBin,MM.nB); %Annual Exceedence Rate no. exceedence observations in each bin nBin x nB
-            MM.RatBlw=NaN(MM.Bn.nBin,MM.nB);  %Annual non-exceedence rate observations in each bin nBin x nB
-            MM.OptSmth=NaN(MM.nB,1);  %Fitted smoothness parameter (smoothness in scale param across bins)
-            MM.CVLackOfFit=NaN(MM.nSmth,MM .nB); %Lack of fit associated with different smoothness parameters
-            MM.BSInd=NaN(numel(MM.Y),MM.nB);  %Bootstrap sample indices
+            MM.Thr=NaN(MM.Bn.nBin,MM.nBoot); %Extreme value threshold nBin x nB
+            MM.Rat=NaN(MM.Bn.nBin,MM.nBoot); %Annual Rate no. exceedence observations in each bin nBin x nB            
+            MM.OptSmth=NaN(MM.nBoot,1);  %Fitted smoothness parameter (smoothness in scale param across bins)
+            MM.CVLackOfFit=NaN(MM.nSmth,MM.nBoot); %Lack of fit associated with different smoothness parameters
+            MM.BSInd=NaN(numel(MM.Y),MM.nBoot);  %Bootstrap sample indices
             MM.SmthSet=logspace(MM.SmthLB,MM.SmthUB,MM.nSmth); %try range smoothness penalties for sigma varying by bin
             
             %% Fit model
@@ -204,16 +202,16 @@ classdef MarginalModel
             %validation
             
             rng(1); %reset random seed to get same bootstrap sample for all marginals
-            MM.BSInd=[(1:length(MM.Y))',randi(length(MM.Y),length(MM.Y),MM.nB-1)];
+            MM.BSInd=[(1:length(MM.Y))',randi(length(MM.Y),length(MM.Y),MM.nBoot-1)];
             rng('shuffle');
             MM.BnMax=accumarray(MM.Bn.A,MM.Y,[MM.Bn.nBin,1],@max,NaN);
                         
-            MM.GmmLct=accumarray(MM.Bn.A,MM.Y,[MM.Bn.nBin,1],@(x)min(x)-range(x)*0.01,0); %threshold (simple quantile in each bin)
+            MM.GmmLct=accumarray(MM.Bn.A,MM.Y,[MM.Bn.nBin,1],@(x)min(x)-range(x)*0.001,0); %threshold (simple quantile in each bin)
                             
             %% Bootstrap loop
-            for iBt = 1:MM.nB %will end up with MM.nB+1 sample parameters (1 for orig data, MM.nB boostrap resampled data)
-                if MM.nB>1
-                    fprintf('Fitting for bootstrap sample %d of %d\n',iBt,MM.nB);
+            for iBt = 1:MM.nBoot %will end up with MM.nBoot+1 sample parameters (1 for orig data, MM.nBoot boostrap resampled data)
+                if MM.nBoot>1
+                    fprintf('Fitting for bootstrap sample %d of %d\n',iBt,MM.nBoot);
                 else
                     fprintf('Fitting sample\n');
                 end
@@ -226,13 +224,13 @@ classdef MarginalModel
                     if any(I)
                         p=gamfit(tY(I)-MM.GmmLct(iBn));
                         
-                        MM.Alp(iBn,iBt)=p(1);
-                        MM.Bet(iBn,iBt)=p(1).*p(2); %orthogonal parameterisation.
+                        MM.Omg(iBn,iBt)=p(1);
+                        MM.Kpp(iBn,iBt)=p(1).*p(2); %orthogonal parameterisation.
                     end
                 end
 
                 %% Threshold                
-                MM.Thr(:,iBt)=MM.gaminv(MM.NEP(iBt),MM.Alp(:,iBt),MM.Bet(:,iBt),MM.GmmLct); %threshold (simple quantile in each bin)
+                MM.Thr(:,iBt)=MM.gaminv(MM.NEP(iBt),MM.Omg(:,iBt),MM.Kpp(:,iBt),MM.GmmLct); %threshold (simple quantile in each bin)
                 
                 %% Get Exceedences
                 IExc=(tY>MM.Thr(A,iBt));   %Index of exceedenses
@@ -241,9 +239,8 @@ classdef MarginalModel
                 Rsd=tY(IExc)-MM.Thr(AExc,iBt);   %Y-u above threshold used for gpfit
                 ObsMax=MM.BnMax(AExc)-MM.Thr(AExc,iBt); %observation max used in upper end point of gp
                 
-                %% Rate of occurence above and below threshold
-                MM.RatExc(:,iBt)=accumarray(AExc,AExc,[MM.Bn.nBin,1],@numel)./MM.Yrs;
-                MM.RatBlw(:,iBt)=accumarray(A(~IExc),A(~IExc),[MM.Bn.nBin,1],@numel)./MM.Yrs;
+                %% Rate of occurence in each bin
+                MM.Rat(:,iBt)=accumarray(A,A,[MM.Bn.nBin,1],@numel)./MM.Yrs;                
                 
                 %% Generalised Pareto Fit
                 MM=GPCrossValidation(MM,Rsd,ObsMax,AExc,iBt);
@@ -263,7 +260,7 @@ classdef MarginalModel
             % - nDat x 1 YUnif,  response data (Y) on Uniform margins
             
             if nargin==1
-                iBt=1:MM.nB;  %default to orginal data
+                iBt=1:MM.nBoot;  %default to orginal data
             end        
             
             YUnif=NaN(numel(MM.Y),numel(iBt));
@@ -299,24 +296,38 @@ classdef MarginalModel
                 RtrPrd = MM.RtrPrd;
             end
             
+            if MM.Bn.nBin==1
+                nBinsplsOmni = 1;
+            else
+                nBinsplsOmni = MM.Bn.nBin+1;
+            end
+            
             %% CDF range
-            CDF_X=permute(linspace(min(min(MM.Y(:)),0),max(MM.Y(:))*3,MM.nRVX),[3,1,2]); %choose range over which to compute return value;                   
+            I=(1:MM.nBoot)'; A=(1:MM.Bn.nBin)';
+            [I,A]=meshgrid(I,A);
+            I=I(:); A=A(:); %find all combinations of bootstraps and bins
+            UL =max(MM.INV((1-1e-8).*ones(size(I)),I,A)); %work out very high quantile to set upper limit for RV calculation
+            LL =max(MM.GmmLct);
+                                    
+            CDF_X=permute(linspace(LL,UL,MM.nRVX),[3,1,2]); %choose range over which to compute return value;                   
          
             %% Empirical_GP Cdf
             P=CDF(MM,CDF_X);
             
             MM.RVX=CDF_X(:);
-            MM.RVPrb=NaN(MM.Bn.nBin+1,MM.nRVX,MM.nRtr);
-            MM.RVMed=NaN(MM.Bn.nBin+1,MM.nRtr);%return value median 
-            MM.RVMedStn=NaN(MM.Bn.nBin+1,MM.nRtr); %return value median on standard scale
+            MM.RVPrb=NaN(nBinsplsOmni,MM.nRVX,MM.nRtr);
+            MM.RVMed=NaN(nBinsplsOmni,MM.nRtr);%return value median 
+%             MM.RVMedStn=NaN(MM.Bn.nBin+1,MM.nRtr); %return value median
+%             on standard scale   %TODO: Can we remove this?
             %% Return Value CDF
             for iRtr=1:MM.nRtr
-                R=exp(-bsxfun(@times,(MM.RatExc+MM.RatBlw).*RtrPrd(iRtr),(1-P))); %Directional RV CDF
-                R(end+1,:,:)=prod(R,1); %#ok %get omni return value
-               
+                R=exp(-bsxfun(@times,MM.Rat.*RtrPrd(iRtr),(1-P))); %Directional RV CDF
+                if nBinsplsOmni > 1
+                    R(end+1,:,:)=prod(R,1); %#ok %get omni return value
+                end
                 MM.RVPrb(:,:,iRtr)=squeeze(mean(R,2));  %posterior predictive return value                
-               
-                for iBin=1:MM.Bn.nBin+1
+            
+                for iBin=1:nBinsplsOmni
                     %original margins
                     [tP,I]=unique(MM.RVPrb(iBin,:,iRtr));
                     tX=MM.RVX(I);
@@ -335,17 +346,21 @@ classdef MarginalModel
             %CDF(MM,X,A,I) compute CDF for all bins and bootstraps using original data at specific
             %bins and bootstraps indexes I                         
             if nargin==3  %Y not specified but A specifed                
-                I=1:MM.nB; 
+                I=1:MM.nBoot; 
             end                     
            
-            if nargin<=2
-                P=MarginalModel.gamgpcdf(X,MM.Shp',MM.Scl,MM.Thr,MM.Alp,MM.Bet,MM.GmmLct,MM.NEP');             
+            if nargin<=2  %cdf for everything 
+                P=MarginalModel.gamgpcdf(X,MM.Shp',MM.Scl,MM.Thr,MM.Omg,MM.Kpp,MM.GmmLct,MM.NEP');             
             else %specified specfic bins and bootstraps           
-                if numel(A)==numel(I) && numel(A)>1
-                    J=sub2ind([MM.Bn.nBin,MM.nB],A,I);
-                    P=MarginalModel.gamgpcdf(X,MM.Shp(I),MM.Scl(J),MM.Alp(J),MM.Bet(J),MM.GmmLct(A),MM.NEP(I));
-                else
-                    P=MarginalModel.gamgpcdf(X,MM.Shp(I)',MM.Scl(A,I),MM.Thr(A,I),MM.Alp(A,I),MM.Bet(A,I),MM.GmmLct(A),MM.NEP(I)');
+                if numel(A)==numel(I) && numel(A)>1   %cdf for subset defined by bins (A) and bootstraps (I), where output is vector
+                    if MM.Bn.nBin == 1  %single covariate bins
+                        P=MarginalModel.gamgpcdf(X,MM.Shp(I),MM.Scl(I)',MM.Thr(I)',MM.Omg(I)',MM.Kpp(I)',MM.GmmLct(A),MM.NEP(I));
+                    else  %multiple covariate bins
+                        J=sub2ind([MM.Bn.nBin,MM.nBoot],A,I);
+                        P=MarginalModel.gamgpcdf(X,MM.Shp(I),MM.Scl(J),MM.Thr(J),MM.Omg(J),MM.Kpp(J),MM.GmmLct(A),MM.NEP(I));
+                    end
+                else  % cdf for subset defined by bins (A) and bootstraps (I)
+                    P=MarginalModel.gamgpcdf(X,MM.Shp(I)',MM.Scl(A,I),MM.Thr(A,I),MM.Omg(A,I),MM.Kpp(A,I),MM.GmmLct(A),MM.NEP(I)');
                 end
             end
             
@@ -359,17 +374,21 @@ classdef MarginalModel
             %PDF(MM,X,A,I) compute PDF for all bins and bootstraps using original data at specific
             %bins and bootstrap indexes I                         
             if nargin==3  %Y not specified but A specifed                
-                I=1:MM.nB; 
+                I=1:MM.nBoot; 
             end                     
            
-            if nargin<=2
-                P=MarginalModel.gamgppdf(X,MM.Shp',MM.Scl,MM.Thr,MM.Alp,MM.Bet,MM.GmmLct,MM.NEP');
+            if nargin<=2  %cdf for everything 
+                P=MarginalModel.gamgppdf(X,MM.Shp',MM.Scl,MM.Thr,MM.Omg,MM.Kpp,MM.GmmLct,MM.NEP');
             else %specified specifc bins and bootstraps
                 if numel(A)==numel(I) && numel(A)>1
-                    J=sub2ind([MM.Bn.nBin,MM.nB],A,I);
-                    P=MarginalModel.gamgppdf(X,MM.Shp(I),MM.Scl(J),MM.Alp(J),MM.Bet(J),MM.GmmLct(A),MM.NEP(I));
-                else
-                    P=MarginalModel.gamgppdf(X,MM.Shp(I)',MM.Scl(A,I),MM.Thr(A,I),MM.Alp(A,I),MM.Bet(A,I),MM.GmmLct(A),MM.NEP(I)');
+                    if MM.Bn.nBin == 1  %single covariate bins
+                        P=MarginalModel.gamgppdf(X,MM.Shp(I),MM.Scl(I)',MM.Thr(I)',MM.Omg(I)',MM.Kpp(I)',MM.GmmLct(A),MM.NEP(I));
+                    else  %multiple covariate bins
+                        J=sub2ind([MM.Bn.nBin,MM.nBoot],A,I);
+                        P=MarginalModel.gamgppdf(X,MM.Shp(I),MM.Scl(J),MM.Thr(J),MM.Omg(J),MM.Kpp(J),MM.GmmLct(A),MM.NEP(I));
+                    end
+                else  % cdf for subset defined by bins (A) and bootstraps (I)
+                    P=MarginalModel.gamgppdf(X,MM.Shp(I)',MM.Scl(A,I),MM.Thr(A,I),MM.Omg(A,I),MM.Kpp(A,I),MM.GmmLct(A),MM.NEP(I)');
                 end
             end
             
@@ -395,13 +414,8 @@ classdef MarginalModel
             end
                                  
             switch Cs
-                case 1 %I scalar --> case where finding inverse CDF in single bin
-                    tNEP=MM.NEP(I);  %non exceedence probability
-                    IExc=P>tNEP;  %index of exceedences          
-                    tP=(P(IExc)-tNEP)./(1-tNEP); %rescale NEP for conditional distribution
-                    X(IExc)=MarginalModel.gpinv(tP,MM.Shp(I),MM.Scl(A,I),MM.Thr(A,I));
-                    
-                    X(~IExc)=MarginalModel.gaminv(P(~IExc),MM.Alp(A,I),MM.Bet(A,I),MM.GmmLct(A,I));
+                case 1 %I scalar --> case where finding inverse CDF in single bin                    
+                    X=MarginalModel.gamgpinv(P,MM.Shp(I),MM.Scl(A,I),MM.Thr(A,I),MM.Omg(A,I),MM.Kpp(A,I),MM.GmmLct(A,I),MM.NEP(I));
                 case 2  %I vector --> case where inverse CDF in across sampled bins and bootstraps
                     tNEP=MM.NEP(I);  %non exceedence probability
                     IExc=P>tNEP;  %index of exceedences
@@ -409,30 +423,18 @@ classdef MarginalModel
                     
                     if MM.Bn.nBin==1
                         X(IExc)=MarginalModel.gpinv(tP,MM.Shp(I(IExc)),MM.Scl(I(IExc))',MM.Thr(I(IExc))');
-                        X(~IExc)=MarginalModel.gaminv(P(~IExc),MM.Alp(I(~IExc))',MM.Bet(I(~IExc))',MM.GmmLct);
+                        X(~IExc)=MarginalModel.gaminv(P(~IExc),MM.Omg(I(~IExc))',MM.Kpp(I(~IExc))',MM.GmmLct);
                     else
-                        J=sub2ind([MM.Bn.nBin,MM.nB],A,I);
+                        J=sub2ind([MM.Bn.nBin,MM.nBoot],A,I);
                         JExc=J(IExc); %pull out indices from common bin allc x bootstrap corresponding to exceedences
                         JBlw=J(~IExc); %pull out indices from common bin allc x bootstrap corresponding to exceedences
                         
                         
                         X(IExc)=MarginalModel.gpinv(tP,MM.Shp(I(IExc)),MM.Scl(JExc),MM.Thr(JExc));
-                        X(~IExc)=MarginalModel.gaminv(P(~IExc),MM.Alp(JBlw),MM.Bet(JBlw),MM.GmmLct(A(~IExc)));
-                    end
-                                      
-                case 3 %I matrix --> case where finding inverse CDF for all bootstraps and bins
-                    tNEP=MM.NEP(I)';  %non exceedence probability
-                    IExc=bsxfun(@gt,P,tNEP);  %index of exceedences
-                    tP=bsxfun(@rdivide,bsxfun(@minus,P,tNEP),(1-tNEP));    
-                    tP(isnan(tP) | tP<0 )=0;
-                    X=MarginalModel.gpinv(tP,MM.Shp(I)',MM.Scl(:,I),MM.Thr(:,I));                         
-                    %% Resample below threshold
-                    X2=MarginalModel.gaminv(tP,MM.Alp(:,I),MM.Bet(:,I),MM.GmmLct);                                             
-                    for iBin=1:MM.Bn.nBin
-                        if any(~IExc(iBin,:))
-                            X(iBin,~IExc(iBin,:))=X2(iBin,~IExc(iBin,:));
-                        end
-                    end                    
+                        X(~IExc)=MarginalModel.gaminv(P(~IExc),MM.Omg(JBlw),MM.Kpp(JBlw),MM.GmmLct(A(~IExc)));
+                    end                                      
+                case 3 %I matrix --> case where finding inverse CDF for all bootstraps and bins                   
+                    X=MarginalModel.gamgpinv(P,MM.Shp(I)',MM.Scl(:,I),MM.Thr(:,I),MM.Omg(:,I),MM.Kpp(:,I),MM.GmmLct,MM.NEP(I)');  
             end
         end %INV
         
@@ -485,11 +487,11 @@ classdef MarginalModel
             [YMrg,YUnif]=Margins(MM,1);
             nSubPlt = 1+2*(~isempty(YUnif)); %number of subplots; if have transformed raw data onto gumbel margins,
             
-            
             figure(1) %Raw response by (Drc) bins
             clf;
             for iC=1:MM.Bn.nCvr
                 subplot(MM.Bn.nCvr,nSubPlt,1+3*(iC-1))
+                grid on
                 plot(MM.X(IExc,iC),MM.Y(IExc),'k.')
                 hold on
                 plot(MM.X(~IExc,iC),MM.Y(~IExc),'.','color',[1,1,1]*0.7)
@@ -548,28 +550,63 @@ classdef MarginalModel
             for iC=1:MM.Bn.nCvr
                 %GP Scale
                 subplot(MM.Bn.nCvr,3,(iC-1)*3+1)
-                PlotParameter(MM.Bn,MM.Scl,iC,'color','k','linewidth',2);
-                PlotBinEdge(MM.Bn,iC);
-                xlabel(MM.CvrLbl(iC))
-                ylabel('\sigma')
+                if MM.Bn.nBin > 1  %if non-stationary, plot as function of covariate
+                    PlotParameter(MM.Bn,MM.Scl,iC,'color','k','linewidth',2);
+                    PlotBinEdge(MM.Bn,iC);
+                    xlabel(MM.CvrLbl(iC))
+                    ylabel('\sigma')
+                else   %if stationary, histogram
+                    if verLessThan('Matlab','8.5')
+                        hist(MM.Scl);
+                        h = findobj(gca,'Type','patch');
+                        set(h,'FaceColor',[1 1 1]*0.5);
+                        set(h,'linestyle','none')
+                    else
+                        histogram(MM.Scl,'edgecolor','none','facecolor','k')
+                    end
+                    xlabel('\sigma')
+                end
                 title(sprintf('%s: GP scale',MM.RspLbl))
             
                 %Gam Alpha
-             
                 subplot(MM.Bn.nCvr,3,(iC-1)*3+2)
-                PlotParameter(MM.Bn,MM.Alp,iC,'color','k','linewidth',2);
-                PlotBinEdge(MM.Bn,iC);
-                xlabel(MM.CvrLbl(iC))
-                ylabel('\alpha')
-                title(sprintf('%s: Gam alpha',MM.RspLbl))
+                if MM.Bn.nBin > 1
+                    PlotParameter(MM.Bn,MM.Omg,iC,'color','k','linewidth',2);
+                    PlotBinEdge(MM.Bn,iC);
+                    xlabel(MM.CvrLbl(iC))
+                    ylabel('\omega')
+                else
+                    if verLessThan('Matlab','8.5')
+                        hist(MM.Omg);
+                        h = findobj(gca,'Type','patch');
+                        set(h,'FaceColor',[1 1 1]*0.5);
+                        set(h,'linestyle','none')
+                    else
+                        histogram(MM.Omg,'edgecolor','none','facecolor','k')
+                    end
+                    xlabel('\omega')
+                end
+                title(sprintf('%s: Gam shape',MM.RspLbl))
                 
                 %Gam Beta
                 subplot(MM.Bn.nCvr,3,(iC-1)*3+3)
-                PlotParameter(MM.Bn,MM.Bet,iC,'color','k','linewidth',2);
-                PlotBinEdge(MM.Bn,iC);
-                xlabel(MM.CvrLbl(iC))
-                ylabel('\beta')
-                title(sprintf('%s: Gam beta ',MM.RspLbl))
+                if MM.Bn.nBin > 1
+                    PlotParameter(MM.Bn,MM.Kpp,iC,'color','k','linewidth',2);
+                    PlotBinEdge(MM.Bn,iC);
+                    xlabel(MM.CvrLbl(iC))
+                    ylabel('\kappa')
+                else
+                    if verLessThan('Matlab','8.5')
+                        hist(MM.Kpp);
+                        h = findobj(gca,'Type','patch');
+                        set(h,'FaceColor',[1 1 1]*0.5);
+                        set(h,'linestyle','none')
+                    else
+                        histogram(MM.Kpp,'edgecolor','none','facecolor','k')
+                    end
+                    xlabel('\kappa')
+                end
+                title(sprintf('%s: Gam scale ',MM.RspLbl))
 
             end
             
@@ -595,10 +632,10 @@ classdef MarginalModel
             savePics(fullfile(MM.FigureFolder,sprintf('Stg3_%s_3_ParametersShape',MM.RspSavLbl)))
             
             %% Lack of fit against different smoothness Lambda
-            if ~all(isnan(MM.CVLackOfFit(:)))
+            if ~all(isnan(MM.CVLackOfFit(:))) && MM.Bn.nBin > 1
                 figure(4);
                 clf;
-                if MM.nB>1 && MM.CVMth==1
+                if MM.nBoot>1 && MM.CVMth==1
                     plot(MM.SmthSet,nanmedian(MM.CVLackOfFit,2),'k-','linewidth',2)
                     hold on
                     plot(MM.SmthSet,quantile(MM.CVLackOfFit,0.025,2),'k--','linewidth',2)
@@ -608,6 +645,7 @@ classdef MarginalModel
                 end
                 axis tight
                 hold on
+                grid on
                 plot(median(MM.OptSmth)*[1,1],ylim,'r--','linewidth',2)
                 ylabel('Lack of fit')
                 xlabel('\lambda')
@@ -617,65 +655,68 @@ classdef MarginalModel
             end
             
             %% Q-Q plots for each bin
-            figure(5);
-            clf           
-            nPlt1=ceil(sqrt(MM.Bn.nBin)); %max size nPlt x nPlt
-            nPlt2=ceil(MM.Bn.nBin./nPlt1);
             nQ=100;
-            Q=permute(linspace(0,max(MM.Y)*1.2,nQ),[1,3,2]);
-            C=MarginalModel.gpcdf(Q,MM.Shp',MM.Scl,MM.Thr);
+            Q=permute(linspace(min(MM.Y),max(MM.Y)*1.2,nQ),[1,3,2]);
+            C=MarginalModel.gamgpcdf(Q,MM.Shp',MM.Scl,MM.Thr,MM.Omg,MM.Kpp,MM.GmmLct,MM.NEP');
             Q=squeeze(Q);
             C=permute(C,[3,1,2]);
             
-            if MM.nB>1
-                qC=quantile(C,[0.025,0.5,0.975],3);
-            end
-            
-            
-            for iB=1:MM.Bn.nBin
-                subplot(nPlt2,nPlt1,iB)
-                I=IExc & MM.Bn.A==iB;
-                if any(I)
-                    P=linspace(0,1,sum(I));
-                    plot(sort(MM.Y(I)),log10(1-P),'r.')  %data
-                    axis tight
-                    hold on
-                    if MM.nB>1
-                        plot(Q,log10(1-qC(:,iB,2)),'k-') %fitted CDF
-                        plot(Q,log10(1-qC(:,iB,1)),'k--') %fitted CDF
-                        plot(Q,log10(1-qC(:,iB,3)),'k--') %fitted CDF
-                    else
-                        plot(Q,log10(1-C(:,iB)),'k-') %fitted CDF
-                    end
-                    xlim([0,max(MM.Y(I))])
-                    
-                    title(sprintf('%s: Bin %s, nExc %g',MM.RspLbl,MM.Bn.BinLbl{iB},sum(I)))
-                    
-                    ylabel('log(1-p)')
-                    xlabel(MM.RspLbl)
-                else %if no data in bin, leave plot empty
-                    title(sprintf('%s: Bin %s, nExc %g',MM.RspLbl,MM.Bn.BinLbl{iB},sum(I)))
-                    box on
+            if MM.Bn.nBin > 1
+                figure(5);
+                clf
+                
+                nPlt1=ceil(sqrt(MM.Bn.nBin)); %max size nPlt x nPlt
+                nPlt2=ceil(MM.Bn.nBin./nPlt1);
+                
+                if MM.nBoot>1
+                    qC=quantile(C,[0.025,0.5,0.975],3);
                 end
+                
+                for iB=1:MM.Bn.nBin
+%                     subplot(,nSubPlt,1+3*(iB-1))
+                    subplot(nPlt2,nPlt1,iB)
+
+                    I=MM.Bn.A==iB;
+                    if any(I)
+                        P=linspace(0,1,sum(I));
+                        plot(sort(MM.Y(I)),log10(1-P),'r.') %data
+                        axis tight
+                        hold on
+                        grid on
+                        if MM.nBoot>1
+                            plot(Q,log10(1-qC(:,iB,2)),'k-')   %fitted CDF
+                            plot(Q,log10(1-qC(:,iB,1)),'k--') 
+                            plot(Q,log10(1-qC(:,iB,3)),'k--') 
+                        else
+                            plot(Q,log10(1-C(:,iB)),'k-')
+                        end
+                        xlim([min(MM.Y(I)),max(MM.Y(I))])
+                        
+                        title(sprintf('%s: Bin %s, nExc %g',MM.RspLbl,MM.Bn.BinLbl{iB},sum(I)))
+                        
+                        ylabel('log(1-p)')
+                        xlabel(MM.RspLbl)
+                    else %if no data in bin, leave plot empty
+                        title(sprintf('%s: Bin %s, nExc %g',MM.RspLbl,MM.Bn.BinLbl{iB},sum(I)))
+                        box on
+                    end
+                end
+                hold off;
+                savePics(fullfile(MM.FigureFolder,sprintf('Stg3_%s_5_SectorGoodnessOfFit',MM.RspSavLbl)))
             end
-            hold off;
-            savePics(fullfile(MM.FigureFolder,sprintf('Stg3_%s_5_SectorGoodnessOfFit',MM.RspSavLbl)))
             
             % Overall QQ plot
             figure(6)
             clf;
-            P=linspace(0,1,sum(IExc));
-            plot(sort(MM.Y(IExc)),log10(1-P),'r.')
+            P=linspace(0,1,MM.nDat);
+            plot(sort(MM.Y),log10(1-P),'r.')
             axis tight
             hold on
-            %DR This was removed on 4/11/2017 don't think its needed anymore
-            %but cannot confirm!!
-            %w=bsxfun(@rdivide,MM.RatExc(MM.NonEmptyBins,:),sum(MM.RatExc(MM.NonEmptyBins,:)));  %propn of exceedence data falling in each bin
-            w=bsxfun(@rdivide,MM.RatExc,sum(MM.RatExc));  %propn of exceedence data falling in each bin
+            w=bsxfun(@rdivide,MM.Rat,sum(MM.Rat,1));  %propn of exceedence data falling in each bin
             COmni=sum(bsxfun(@times,shiftdim(w,-1),C),2); %sum ( prob in bin .* CDF(:,iBin) )
             
             COmni(COmni>=1)=1;
-            if MM.nB>1
+            if MM.nBoot>1
                 qCOmni=squeeze(quantile(COmni,[0.025,0.5,0.975],3));
                 plot(Q,log10(1-qCOmni(:,2)),'k-')
                 hold on
@@ -686,14 +727,15 @@ classdef MarginalModel
             xlim([0,max(MM.Y)])
             title(sprintf('%s: Overall goodness of fit',MM.RspLbl))
             ylabel('log(1-p)')
+            grid on
             xlabel(MM.RspLbl)
             savePics(fullfile(MM.FigureFolder,sprintf('Stg3_%s_6_OverallGoodnessOfFit',MM.RspSavLbl)))
             
             %% Threshold uncertianty
-            if MM.nB>1 && numel(unique(MM.NEP))>1
+            if MM.nBoot>1 && numel(unique(MM.NEP))>1
                 figure(7);
-                clf;
-                if MM.nB>50
+                clf;   
+                if MM.nBoot>50
                     nNEP = 10; %number of bins for threshold diagnostic plot
                     NEPEdg=linspace(min(MM.NEP),max(MM.NEP),nNEP+1);
                     NEPBin=(NEPEdg(1:end-1)+NEPEdg(2:end))/2;
@@ -713,38 +755,54 @@ classdef MarginalModel
                 plot(MM.NEP,MM.Shp,'k.','markersize',20)
                 xlabel('NEP')
                 ylabel('GP shape \xi')
+                grid on
                 title(sprintf('%s: GP shape stability by threshold',MM.RspLbl))
                 savePics(fullfile(MM.FigureFolder,sprintf('Stg3_%s_7_ThresholdStability',MM.RspSavLbl)))
             end
             
             %% Return Value CDF plot
+            ColMat=hsv(MM.Bn.nBin);
             
             figure(8);
             clf;
+            grid on
             for iRtr=1:MM.nRtr
                 subplot(MM.nRtr,1,iRtr)
-                plot(MM.RVX,MM.RVPrb(1:MM.Bn.nBin,:,iRtr),'linewidth',2)
-                hold on
+                if MM.Bn.nBin > 1
+                    for iBin = 1:MM.Bn.nBin
+                        plot(MM.RVX,MM.RVPrb(iBin,:,iRtr),'color',ColMat(iBin,:),'linewidth',2)
+                        hold on
+                    end
+                end
                 plot(MM.RVX,MM.RVPrb(end,:,iRtr),'k','linewidth',2)
                 
-                I0 = max(MM.RVPrb(:,:,1))>1e-3;
-                I1 = min(MM.RVPrb(:,:,end))<1-1e-3;
-                xlim([min(MM.RVX(I0)),max(MM.RVX(I1))])
+                I0 = max(MM.RVPrb(:,:,1),[],1)>1e-3;
+                I1 = min(MM.RVPrb(:,:,end),[],1)<1-1e-2;               
                 hold on
                 plot(xlim,[0.5,0.5],'--k')
                 plot(xlim,[exp(-1),exp(-1)],'--k')
                 
+                xlim([min(MM.RVX(I0)),max(MM.RVX(I1))])
                 ylabel('Cumulative Probability')
                 xlabel(MM.RspLbl)
                 
-                legend([MM.Bn.BinLbl(:);'Omni'],'location','best');
+                if MM.Bn.nBin >1 && iRtr==1
+                    legend([MM.Bn.BinLbl(:);'Omni'],'location','best');
+                end
                 
                 title(sprintf('Return-Value CDF %g Years',MM.RtrPrd(iRtr)))
             end
             savePics(fullfile(MM.FigureFolder,sprintf('Stg3_%s_8_ReturnValueCDF',MM.RspSavLbl)))
             
         end %PlotDiagnGP
-        
+
+        function [UL,LL,Rng] = makeRange(MM,I, A)
+            % makeRange: generate upper and lower bounds and range for importance sampler
+            UL = MM.INV((1-1e-8).*ones(size(I)),I,A);
+            LL = MM.GmmLct(A);
+            Rng = (UL-LL);           
+        end % makeRange
+
     end %methods
     
     methods (Access = private)
@@ -1015,6 +1073,7 @@ classdef MarginalModel
                               
             %gamma part
             X1=MarginalModel.gaminv(P,Alp,Bet,GmmLct);
+            IBlw=P<Tau;
             
             %gp part (adjust probabilities)
             PGP=bsxfun(@rdivide,(P-Tau),(1-Tau));

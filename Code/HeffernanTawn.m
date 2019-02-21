@@ -7,12 +7,13 @@ classdef HeffernanTawn
         Rsd   % nBoot x 1 (cell array), residuals from each bootstrap
         Thr   % nBoot x 1, H&T conditional threshold        
         NEP   % 1 x 1, non exceedence probability
-        nB    % 1 x 1, number of bootstraps (from marginal)            
+        nBoot    % 1 x 1, number of bootstraps (from marginal)            
         X     % n x nBoot, Conditioned variable on Standard Margins
         Y     % n x nBoot, conditioning variable on Standard Margins
         RV % Conditional Return Value Y | X        
         n     % 1 x 1, number of observations
         nDmn  % 1 x 1, number of dimensions
+        SmpLclRsdOn=true;   % 1 x 1, flag for sampling residuals locally from cvr bin (1) or globally (0)
     end
     
     properties(Hidden=true)
@@ -44,7 +45,7 @@ classdef HeffernanTawn
     end
             
     methods
-        function HT=HeffernanTawn(Mrg,HTNEP,NonStationary,CV)
+        function HT=HeffernanTawn(Mrg,HTNEP,NonStationary,CV,SmpLclRsdOn)
             %HT=HeffernanTawn(Mrg,CndInd,T...
             %INPUT
             % - Mrg 2 x 1, marignal model structure *output from stage 3
@@ -82,12 +83,15 @@ classdef HeffernanTawn
             
             validateattributes(NonStationary,{'logical','numeric'},{'integer'},'HeffernanTawn','HTNEP',3)
             HT.NonStat=logical(NonStationary);  %flag for nonstationary HT model
+            if nargin<5
+                HT.SmpLclRsdOn=logical(SmpLclRsdOn); %flag for sampling residuals locally from bin or globally
+            end
             %check have same number of bootstrap resamples for each margin
             %HT.NonEmptyBins = []; %preallocate
             for i = 2:HT.nDmn % loop over margins                
                 %check have same number of bootstrap resamples for each margin
-                if Mrg(1).nB~=Mrg(i).nB
-                    error('Marginal 1 and %d should have the same number of bootstrap resamples. Mrg1 nB = %d; Mrg%d nB = %d',i,Mrg(1).nB,i,Mrg(i).nB);
+                if Mrg(1).nBoot~=Mrg(i).nBoot
+                    error('Marginal 1 and %d should have the same number of bootstrap resamples. Mrg1 nBoot = %d; Mrg%d nBoot = %d',i,Mrg(1).nBoot,i,Mrg(i).nBoot);
                 end
                 %Check fitted each margin to same bootstrap resamples in                                
                 if any(Mrg(1).BSInd(:)~=Mrg(i).BSInd(:))
@@ -126,17 +130,9 @@ classdef HeffernanTawn
             
             %% Pre-allocation
             HT.n=size(Mrg(1).BSInd,1);
-            HT.nB=Mrg(1).nB;
+            HT.nBoot=Mrg(1).nBoot;
             
-            MinNEP=max(Mrg(1).NEP,HTNEP(1));
-            RngNEP=HTNEP(2)-MinNEP;
-            if any(RngNEP<=0)
-               error('HT threshold Upper bound needs to be bigger than Mrg threshold upper bound')
-            end
-            HT.NEP = rand(HT.nB,1).*RngNEP+MinNEP;    
-            if any(HT.NEP<Mrg(1).NEP)
-               error('All NEP for HT must be bigger than Mrg(1).NEP') 
-            end
+            HT.NEP = rand(HT.nBoot,1).*(HTNEP(2)-HTNEP(1))+HTNEP(1);    
             HT.nBin=Mrg(1).Bn.nBin;
             if HT.NonStat %get number of model bins (number of alpha parameters).
                 if HT.nBin == 1
@@ -149,14 +145,14 @@ classdef HeffernanTawn
             end
             HT.nPrm= HT.nAlp+3;  %HT.nAlp + 3 other parametes
             
-            HT.Prm=NaN(HT.nPrm,HT.nDmn-1,HT.nB);
-            HT.Thr=NaN(HT.nB,HT.nDmn-1);
-            HT.Rsd=cell(HT.nB,1); %different numbers of residuals for each bootstrap so store in cell
-            HT.RsdInd=cell(HT.nB,1); %bin index of exceedences used in local sampling of residual;            
+            HT.Prm=NaN(HT.nPrm,HT.nDmn-1,HT.nBoot);
+            HT.Thr=NaN(HT.nBoot,HT.nDmn-1);
+            HT.Rsd=cell(HT.nBoot,1); %different numbers of residuals for each bootstrap so store in cell
+            HT.RsdInd=cell(HT.nBoot,1); %bin index of exceedences used in local sampling of residual;            
             
-            HT.Y=NaN(HT.n,HT.nDmn-1,HT.nB);
-            HT.A=NaN(HT.n,HT.nB);
-            HT.OptSmth=NaN(HT.nB,1);
+            HT.Y=NaN(HT.n,HT.nDmn-1,HT.nBoot);
+            HT.A=NaN(HT.n,HT.nBoot);
+            HT.OptSmth=NaN(HT.nBoot,1);
                         
             if HT.NonStat                
                 HT.SmthSet=logspace(HT.SmthLB,HT.SmthUB,HT.nSmth); %try range smoothness penalties for sigma varying by bin
@@ -164,32 +160,32 @@ classdef HeffernanTawn
                 HT.nSmth=1;
                 HT.SmthSet=0;    %Switch off smoothness              
             end
-            HT.CVLackOfFit=NaN(HT.nSmth,HT.nB);
+            HT.CVLackOfFit=NaN(HT.nSmth,HT.nBoot);
                         
             HT.X=Margins(Mrg(1));
            
             %% Fit H&T Model      
-            for iBt=1:HT.nB           %loop over bootstrap resamples
-                fprintf('Fitting for bootstrap sample %d of %d\n',iBt,HT.nB);
+            for iBt=1:HT.nBoot           %loop over bootstrap resamples
+                fprintf('Fitting for bootstrap sample %d of %d\n',iBt,HT.nBoot);
                 %transform conditioned variable to Standard margins for iBt'th bootstrap
                 HT.Thr(iBt)=Mrg(1).INV_Standard(HT.NEP(iBt)); 
                 %HT.Thr(iBt)=quantile( HT.X(:,iBt),HT.NEP(iBt)); %find the H&T threshold
                 IExc= HT.X(:,iBt)>HT.Thr(iBt);   %threshold exceedences
-                %transform conditioning variable to Standard margins for iBt'th bootstrap      
-                J=Mrg(1).BSInd(Mrg(1).BSInd(:,iBt)>0,iBt);
-                HT.A(J,iBt)=Mrg(1).Bn.A(J); %TODO do I need to store this?    
+                %transform conditioning variable to Standard margins for iBt'th bootstrap                          
+               
+                J=Mrg(1).BSInd(:,iBt);   
+                HT.A(:,iBt)=Mrg(1).Bn.A(J);
+                                
                 HT.RsdInd{iBt}=HT.A(IExc,iBt);
                 for iDmn=2:HT.nDmn
-                    HT.Y(:,iDmn-1,iBt)=Margins(Mrg(iDmn),iBt); %TODO vectorise this
+                    HT.Y(:,iDmn-1,iBt)=Margins(Mrg(iDmn),iBt); 
                 end
                 %% Fit Model
                 HT=Fit(HT,IExc,iBt);
             end
             
             %% Compute conditional Return Value
-            HT=ConditionalReturnValue(HT,Mrg);
-            
-         
+            HT=ConditionalReturnValue(HT,Mrg);                     
             
         end %HeffernanTawn constructor
                                        
@@ -203,14 +199,12 @@ classdef HeffernanTawn
             % - Data structure Sml, data simulated from H&T model on Org,
             % Unif and Standard margins
                                               
-            I=randi(HT.nB,nRls,1);%decide which bootstrap sample to use over all bootstraps HT.nB
+            I=randi(HT.nBoot,nRls,1);%decide which bootstrap sample to use over all bootstraps HT.nBoot
             
             %% simulate covariate
    
             if Mrg(1).Bn.nBin>1
-                Rat=(Mrg(1).RatExc+Mrg(1).RatBlw);  %get rate of all observations
-                Rat=Rat(:,I);
-                
+                Rat=Mrg(1).Rat(:,I);  %get rate of all observations                                
                 RatCdf=cumsum(Rat)/sum(Rat); %get rate cdf
                 
                 %Simulate covariate with right rate
@@ -222,7 +216,7 @@ classdef HeffernanTawn
             end
             
             
-            J=sub2ind([HT.nBin,HT.nB],Sml.A,I);  %common index across bin allocation and bootstrap
+            J=sub2ind([HT.nBin,HT.nBoot],Sml.A,I);  %common index across bin allocation and bootstrap
             
             %% simulate on standard scale
             
@@ -235,7 +229,7 @@ classdef HeffernanTawn
                 tAlp=NaN(nRls,HT.nDmn-1);
                 for iDmn=1:HT.nDmn-1
                     t1=permute(HT.Prm(1:HT.nAlp,iDmn,:),[1,3,2]);  %nBin x nDmn - 1 x nBoot                   
-                    tAlp(:,iDmn)=t1(J); %nRls x 1 %TODO Check is right in nDmn
+                    tAlp(:,iDmn)=t1(J); %nRls x 1 
                 end
                 %%
             else
@@ -281,22 +275,16 @@ classdef HeffernanTawn
                         Sml.StnMrg(iRls,2:end)=-Inf;
                     end
                 end
-%                 if any(isnan(Sml.StnMrg(iRls,:)))
-%                     error('NaNs found in simulation Sml.StnMrg\n')
-%                 end
+
             end
-            
-%             if any(isnan(Sml.StnMrg(:)))
-%                error('NaNs found in simulation Sml.StnMrg\n') 
-%             end
-%             
+
             %% Transform to uniform
             Sml.Unf=CDF_Standard(Mrg(1),Sml.StnMrg);          
             
             %% Transform back to original margin
             Sml.Org=NaN(size(Sml.Unf));            
             for iDmn=1:HT.nDmn %loop over dimension                
-                Sml.Org(:,iDmn)=INV(Mrg(iDmn),Sml.Unf(:,iDmn),I,Sml.A);                
+                Sml.Org(:,iDmn)=Mrg(iDmn).INV(Sml.Unf(:,iDmn),I,Sml.A);                
             end
                                                         
         end %simulate             
@@ -312,19 +300,23 @@ classdef HeffernanTawn
             % - Data structure Sml, data simulated from H&T model on Org,
             % Unif and Standard margins
             
-            %Sml.I=randi(HT.nB,nRls,1);%decide which bootstrap sample to use over all bootstraps HT.nB       
-            Sml.I=ones(nRls,1);%decide which bootstrap sample to use over all bootstraps HT.nB       
-            %% simulate covariate
-            
-            Rat=(Mrg(1).RatExc+Mrg(1).RatBlw);  %get rate of all observations
-            RatNrm=Rat./sum(Rat,1);
+            Sml.I=randi(HT.nBoot,nRls,1);%decide which bootstrap sample to use over all bootstraps HT.nBoot       
+            %Sml.I=ones(nRls,1);%decide which bootstrap sample to use over all bootstraps HT.nBoot       
+            %% simulate covariate                       
+            RatNrm=Mrg(1).Rat./sum(Mrg(1).Rat,1); %nBin x nBoot
             %Simulate covariate with right rate
             Sml.A=randi(HT.nBin,nRls,1);  %bin allocation
             Sml.X=SampleCovariateFromBin(Mrg(1).Bn,Sml.A);  %Sample covariate value uniformly from  within bin
-            J=sub2ind([HT.nBin,HT.nB],Sml.A,Sml.I);  %common index across bin allocation and bootstrap
             
-            W=RatNrm(J); %probability weight for chosen bin;
-
+            if HT.nBin==1
+                J=Sml.I;
+                W=RatNrm(J)'; %nRls x 1 %probability weight for chosen bin;
+            else                
+                J=sub2ind([HT.nBin,HT.nBoot],Sml.A,Sml.I);  %common index across bin allocation and bootstrap
+                W=RatNrm(J); %nRls x 1 %probability weight for chosen bin;
+            end
+            
+          
             %% simulate on original scale
             %gp upper endpoint in each dimension   
             
@@ -348,15 +340,15 @@ classdef HeffernanTawn
             %% simulated data
             for iDmn=1:HT.nDmn
                 %% Find sensible range to draw values over
-                [UL,LL,Rng] = HT.makeRange(Sml,Mrg(iDmn),nRls);
+                [UL,LL,Rng] = Mrg(iDmn).makeRange(Sml.I,Sml.A);
                 Sml.Org(:,iDmn)= Sml.Org(:,iDmn).*Rng+LL; %sample uniform value                
                              
                 %transform to uniform scale;
-                Sml.Unf(:,iDmn)=Mrg(iDmn).CDF(Sml.Org(:,iDmn),Sml.A,Sml.I);
+                Sml.Unf(:,iDmn)=Mrg(iDmn).CDF(Sml.Org(:,iDmn),Sml.A,Sml.I);   
                 %transform to standard margins;
                 Sml.StnMrg(:,iDmn)=INV_Standard(Mrg(iDmn),Sml.Unf(:,iDmn));
                             
-                %% Density of computed peints
+                %% Density of computed points
                 if iDmn==1  %first dimension standard marginal denisty
                     %compute density of chosen points (other dimensions use the HT density)
                     Sml.fog(:,1)=Mrg(1).PDF(Sml.Org(:,1),Sml.A,Sml.I).*Rng.*W; %importance weights
@@ -382,14 +374,17 @@ classdef HeffernanTawn
                     tMu=squeeze(HT.Prm(HT.nAlp+2,iAsc,IBtExc));
                     tSgm=squeeze(HT.Prm(HT.nAlp+3,iAsc,IBtExc));
                     
-                    Xpb=Sml.StnMrg(IExc,1).^tBet;                                        
-                    mu=bsxfun(@minus,bsxfun(@minus,Sml.StnMrg(IExc,iDmn),tAlp(IExc,iAsc).*Sml.StnMrg(IExc,1)),Xpb.*tMu);                    
+                    % Y= aX+X^b (m+s Z);
+                    %  ((Y- aX) -m X ^b)./ s X^b =Z
+                    
+                    Xpb=Z(IExc,1).^tBet;                                        
+                    mu=bsxfun(@minus,bsxfun(@minus,Z(IExc,2),tAlp(IExc,iAsc).*Z(IExc,1)),Xpb.*tMu);                    
                     sgm=Xpb.*tSgm;
                     Z=bsxfun(@rdivide,mu,sgm);
                     %residual desnity comes from kernel deinsty estimation
                     fygx_HT=NaN(nE,1);
                    
-                    for iBt=1:HT.nB %loop over bootstraps
+                    for iBt=1:HT.nBoot %loop over bootstraps
                         I=IBtExc==iBt; %
                         if any(I)                                                                                    
                             %TODO add localisation of residuals!!                           
@@ -427,16 +422,14 @@ classdef HeffernanTawn
             RV.Y_Stn=NaN(HT.nBin,nAsc,nRls,HT.nRtr);
             RV.Y=NaN(HT.nBin,nAsc,nRls,HT.nRtr);
                
-            I=randi(HT.nB,nRls,1);  %bootstrap samples to use
+            I=randi(HT.nBoot,nRls,1);  %bootstrap samples to use
             %draw random resdiuals
-            
-            % tRsd=HT.Rsd(I,:);
-            
-            if HT.nBin>10
+           
+            if ~HT.SmpLclRsdOn   %if too many bins (few obs per bin), sample residuals globally
                 Z=cell2mat(cellfun(@(x)x(randi(numel(x),HT.nBin,1))',HT.Rsd(I,:),'uniformoutput',false))'; %TODO check multivariate cases
                 Z=permute(Z,[1,3,2]);
                 
-            else %only works for small number of bins but localises residuals
+            else   %when your bins are big enough (decent no. of obs per bin), sample residuals locally from bin
                 Z=NaN(nRls,nAsc,HT.nBin);
                 for iBin=1:HT.nBin
                     tRsd=cellfun(@(x,y)y(x==iBin,:),HT.RsdInd(I,:),HT.Rsd(I,:),'uniformoutput',false);
@@ -449,13 +442,14 @@ classdef HeffernanTawn
             for iRtr=1:HT.nRtr %loop over return periods
                             
                 %% Sample from return value distribution within each bin     
-                rho=Mrg(1).RatExc(:,I)+Mrg(1).RatBlw(:,I); %annual rate of occurence
+                rho=Mrg(1).Rat(:,I); %annual rate of occurence
                 LT=rho*Mrg(1).RtrPrd(iRtr); %poisson Rate                
-                
+                                
                 UX=rand(HT.nBin,nRls); %U should be in the range [ P0, 1] where P0 is the non occurence rate.                
                 P=1+log(UX)./(LT);    %adjust for return period  (inv of exp(-L*T*(1-C));
                 P(bsxfun(@lt,P,HT.NEP(I)'))=NaN;  %this is the non-exceedence rate on standard scale
-                RV.X(:,:,iRtr)=INV(Mrg(1),P,I); %RVX values on original scale
+                %P(P<0)=NaN;  %this is the non-exceedence rate on standard scale
+                RV.X(:,:,iRtr)=Mrg(1).INV(P,I); %RVX values on original scale
                 
                 %transform form uniform to standard margins using CDF                                                                
                 RV.X_Stn(:,:,iRtr)=INV_Standard(Mrg(1),P);
@@ -463,37 +457,39 @@ classdef HeffernanTawn
                 %compute Y using conditional model given X 
                 tX=permute(RV.X_Stn(:,:,iRtr),[1,3,2]);
                 RV.Y_Stn(:,:,:,iRtr)=bsxfun(@times,HT.Prm(1:HT.nAlp,:,I),tX) + bsxfun(@power,tX,HT.Prm(HT.nAlp+1,:,I)).*bsxfun(@plus,HT.Prm(HT.nAlp+2,:,I),bsxfun(@times,HT.Prm(HT.nAlp+3,:,I),Z));
-                                                    
-                %transform Y from standard to uniform margins using CDF
-                UY=CDF_Standard(Mrg(1),RV.Y_Stn);
-                
-                %Transform Y to back original margins
+                                                                                                                 
                 for iAsc=1:nAsc
-                    
-                    RV.Y(:,iAsc,:,iRtr)=permute(INV(Mrg(iAsc+1),permute(UY(:,iAsc,:,iRtr),[1,3,2]),I),[1,3,2]);
+                    %transform Y from standard to uniform margins using CDF   
+                    UY=permute(Mrg(iAsc+1).CDF_Standard(RV.Y_Stn(:,iAsc,:,iRtr)),[1,3,2]); %nBin x nAsc x nRls x nRtr
+                    %Transform Y to back original margins
+                    RV.Y(:,iAsc,:,iRtr)=permute(Mrg(iAsc+1).INV(UY,I),[1,3,2]);
                 end                                  
             end
             
             %% Get Omni Value (covariate free) return value and its associated conditions
-            XOmni_Stn=max(RV.X_Stn,[],1); 
-            [XOmni,J]=max(RV.X,[],1);    %J is index of location of max
-              
-            YOmni=NaN(1,nAsc,nRls,HT.nRtr);
-            YOmni_Stn=NaN(1,nAsc,nRls,HT.nRtr);
-            for iRtr=1:HT.nRtr
-                I=sub2ind([HT.nBin,nRls],J(:,:,iRtr),(1:nRls)); %need composite index of realisation and max location
-                %original margins
-                tYOmni=reshape(permute(RV.Y(:,:,:,iRtr),[1,3,2]),HT.nBin*nRls,nAsc);                
-                YOmni(1,:,:,iRtr)=permute(tYOmni(I,:),[3,2,1]);                
-                %standard margins
-                tYOmni_Stn=reshape(permute(RV.Y_Stn(:,:,:,iRtr),[1,3,2]),HT.nBin*nRls,nAsc);
-                YOmni_Stn(1,:,:,iRtr)=permute(tYOmni_Stn(I,:),[3,2,1]);                
+            if HT.nBin > 1
+                
+                XOmni_Stn=max(RV.X_Stn,[],1);
+                [XOmni,J]=max(RV.X,[],1);    %J is index of location of max
+                
+                YOmni=NaN(1,nAsc,nRls,HT.nRtr);
+                YOmni_Stn=NaN(1,nAsc,nRls,HT.nRtr);
+                for iRtr=1:HT.nRtr
+                    I=sub2ind([HT.nBin,nRls],J(:,:,iRtr),(1:nRls)); %need composite index of realisation and max location
+                    %original margins
+                    tYOmni=reshape(permute(RV.Y(:,:,:,iRtr),[1,3,2]),HT.nBin*nRls,nAsc);
+                    YOmni(1,:,:,iRtr)=permute(tYOmni(I,:),[3,2,1]);
+                    %standard margins
+                    tYOmni_Stn=reshape(permute(RV.Y_Stn(:,:,:,iRtr),[1,3,2]),HT.nBin*nRls,nAsc);
+                    YOmni_Stn(1,:,:,iRtr)=permute(tYOmni_Stn(I,:),[3,2,1]);
+                end
+                
+                RV.Y=cat(1,RV.Y,YOmni);
+                RV.Y_Stn=cat(1,RV.Y_Stn,YOmni_Stn);
+                RV.X=cat(1,RV.X,XOmni);
+                RV.X_Stn=cat(1,RV.X_Stn,XOmni_Stn);
+                
             end
-            
-            RV.Y=cat(1,RV.Y,YOmni);
-            RV.Y_Stn=cat(1,RV.Y_Stn,YOmni_Stn);
-            RV.X=cat(1,RV.X,XOmni);
-            RV.X_Stn=cat(1,RV.X_Stn,XOmni_Stn);
             
             %% Store Return Value simulation
             HT.RV=RV;
@@ -515,11 +511,10 @@ classdef HeffernanTawn
             
             %% Plot  data and simulation
             figure;
-            clf;  %TODO think about plot in case nDmn>4
+            clf;  
             for iDmn = 2:HT.nDmn
                 subplot(2,HT.nDmn-1,iDmn-1)
                 
-                hold on
                 plot(Sml.StnMrg(:,1),Sml.StnMrg(:,iDmn),'r.')
                 hold on
                 plot(HT.X(:,1),HT.Y(:,iDmn-1,1),'k.','markersize',10)
@@ -529,6 +524,7 @@ classdef HeffernanTawn
                 legend('Simulation','Data','location','NorthWest')
                 axis tight
                 box on
+                grid on
             end
             
             for iDmn = 2:HT.nDmn
@@ -541,6 +537,7 @@ classdef HeffernanTawn
                 ylabel(sprintf('%s: Conditioned variable',Mrg(iDmn).RspLbl));
                 title(sprintf('%s|%s: H&T simulation on original scale',Mrg(iDmn).RspLbl,Mrg(1).RspLbl))
                 axis tight
+                grid on
             end
             
             
@@ -549,11 +546,11 @@ classdef HeffernanTawn
             %% Residual Diagnostics orignal sample
             figure;
             clf;
-            tRsd=cell2mat(HT.Rsd);           
-            
+            tRsd=cell2mat(HT.Rsd);    
+                     
             %histogram of redisuals in ith variable
             for iDmn = 1:(HT.nDmn-1)
-                subplot(HT.nDmn-1,3,3*iDmn-2)
+                subplot((HT.nDmn-1),2,2*iDmn-1)
                 if verLessThan('Matlab','8.5')
                     hist(tRsd(:,iDmn));
                     h = findobj(gca,'Type','patch');
@@ -568,7 +565,8 @@ classdef HeffernanTawn
             end
             %qq plot of redisuals in ith variable
             for iDmn = 1:(HT.nDmn-1)
-                subplot(HT.nDmn-1,3,3*iDmn-1);
+
+                subplot(HT.nDmn-1,2,2*iDmn);
                 h=qqplot(tRsd(:,iDmn));
                 if verLessThan('Matlab','8.5')                    
                     h = findobj(gca,'Type','patch');
@@ -584,73 +582,72 @@ classdef HeffernanTawn
                 xlabel('Standard normal quantiles')
                 axis tight
                 box on
-                title(sprintf('%s|%s: resid QQ-plot',Mrg(iDmn+1).RspLbl,Mrg(1).RspLbl))  %,Mrg(iDmn+1).Lbl,Mrg(1).Lbl)
+                title(sprintf('%s|%s: resid QQ-plot',Mrg(iDmn+1).RspLbl,Mrg(1).RspLbl)) 
             end
-                        
-            %qq plot of redisuals in ith variable
-            for iC=1:Mrg(1).nCvr
-                subplot(Mrg(1).nCvr,3,3*iC)
-                IExc=HT.X(:,1)>HT.Thr(1);   %threshold exceedences
-                IExc=IExc(Mrg(1).BSInd(:,1)>0);
-                plot(Mrg(1).X(IExc,iC),HT.Rsd{1},'k.')  %TODO make work for all samples!!
-                set(gca,'xtick',0:90:360);
-                axis tight
-                xlabel(Mrg(1).CvrLbl(iC))
-                title(sprintf('Residuals on %s',Mrg(1).CvrLbl{iC}))
-                
-                if iC==Mrg(1).nCvr
-                    LgnLbl=cell(HT.nDmn-1,1);
-                    for iDmn=2:HT.nDmn
-                        LgnLbl{iDmn-1}=sprintf('%s|%s',Mrg(iDmn).RspLbl,Mrg(1).RspLbl);
-                    end
-                    legend(LgnLbl,'location','best')
+            savePics(fullfile(HT.FigureFolder,'Stg4_HT_2_ResidualDiagnostics1'))
+   
+            
+            %% Residual diagnostics: residuals against covariates
+            figure;clf;
+            iP = 0; %counter on subplot number
+            for iDmn = 1:(HT.nDmn-1)
+                for iC=1:Mrg(1).nCvr
+                    iP = iP +1;
+                    subplot(HT.nDmn-1,Mrg(1).nCvr,iP)
+                    IExc=HT.X(:,1)>HT.Thr(1);   %threshold exceedences
+                    IExc=IExc(Mrg(1).BSInd(:,1)>0);
+                    plot(Mrg(1).X(IExc,iC),HT.Rsd{1}(:,iDmn),'k.')
+                    axis tight
+                    box on
+                    grid on
+                    xlabel(Mrg(1).CvrLbl(iC))
+                    title(sprintf('%s|%s: Residuals on %s',Mrg(iDmn+1).RspLbl,Mrg(1).RspLbl,Mrg(1).CvrLbl{iC}))
                 end
-            end 
+            end
         
             
-            savePics(fullfile(HT.FigureFolder,'Stg4_HT_2_ResidualDiagnostics'))
+            savePics(fullfile(HT.FigureFolder,'Stg4_HT_2_ResidualDiagnostics2'))
             
             %% Parameter Plot (bootstrap uncertainty)
-            figure;
-            clf;
-            Lbl={'\alpha','\beta','\mu','\sigma'};
-
-            for i=1:4          %loop over parameters   
-                j=i+HT.nAlp-1;
-                if HT.nAlp>1 && i==1  
-                    for iC=1:Mrg(1).nCvr
-                        subplot(Mrg(1).nCvr,2,(iC-1)*2+1)  
-                        hold on
-                        C=lines((HT.nDmn-1));
-                        for iDmn=1:(HT.nDmn-1)
-                            tAlp=HT.Prm(1:HT.nAlp,:,iDmn);
-                            PlotParameter(Mrg(1).Bn,tAlp,iC,'color',C(iDmn,:),'linewidth',2)
+            LgnLbl=cell(HT.nDmn-1,1);
+            for iDmn = 1:(HT.nDmn-1)
+                LgnLbl{iDmn} = sprintf('%s|%s',Mrg(iDmn+1).RspLbl,Mrg(1).RspLbl);
+            end
+            Lbl={'\alpha','\beta','m','s'};
+            
+            for iDmn = 1:(HT.nDmn-1) %different parameters figure for each dimension
+                figure;
+                clf;
+                
+                for i=1:4          %loop over parameters
+                    j=i+HT.nAlp-1;
+                    if HT.nAlp>1 && i==1
+                        for iC=1:Mrg(1).nCvr
+                            subplot(Mrg(1).nCvr,2,(iC-1)*2+1)
+                            hold on
+                            
+                            tAlp=squeeze(HT.Prm(1:HT.nAlp,iDmn,:));
+                            PlotParameter(Mrg(1).Bn,tAlp,iC,'color',[0,0,0],'linewidth',2)
+                            
+                            xlabel(Mrg(1).CvrLbl(iC))
+                            ylabel(Lbl{i})
+                            box on
+                            grid on
                         end
-                        xlabel(Mrg(1).CvrLbl(iC))
-                        ylabel(Lbl{i})
-                      %  ylim([0,1])
-                    end
-                else   
-                    if i==1
-                       subplot(1,2,1)
                     else
-                       subplot(3,2,(i-1)*2)
-                    end
-                    BW = 0;   %set BW to zero for first iteration
-                    LgnLbl=cell(HT.nDmn-1,1);
-                    for iDmn = 1:(HT.nDmn-1)
+                        if i==1
+                            subplot(1,2,1)
+                        else
+                            subplot(3,2,(i-1)*2)
+                        end
+                        
                         if verLessThan('Matlab','8.5')
-                            hist(HT.Prm(j,:))
+                            hist(squeeze(HT.Prm(j,iDmn,:)));
                             h = findobj(gca,'Type','patch');
                             set(h,'FaceColor',[1 1 1]*0.5);
                             set(h,'linestyle','none')
                         else
-                            if BW ~=0 %bin width not set yet
-                                histogram(squeeze(HT.Prm(j,iDmn,:)),'DisplayStyle','stairs','Normalization','pdf','BinWidth',BW,'linewidth',2);
-                            else
-                                h = histogram(squeeze(HT.Prm(j,iDmn,:)),'DisplayStyle','stairs','Normalization','pdf','linewidth',2);
-                                BW = h.BinWidth; %set bin widths for next dimension
-                            end
+                            histogram(squeeze(HT.Prm(j,iDmn,:)),'edgecolor','none','facecolor','k')
                         end
                         hold on
                         xlabel(Lbl{i})
@@ -664,38 +661,40 @@ classdef HeffernanTawn
                         end
                         if i==3 %\mu
                             
-                            t1=max(abs(HT.Prm(j,:)));
+                            t1=max(abs(HT.Prm(j,iDmn,:)));
                             if t1 < eps
                                 t1=0.1;
                             end
                             xlim([-t1,t1]);  %make mu plot centered around 0
                         end
-                        LgnLbl{iDmn} = sprintf('%s|%s',Mrg(iDmn+1).RspLbl,Mrg(1).RspLbl);
-                    end
-                    if i==4
-                        legend(LgnLbl,'location','best')
+                        if i==4
+                            legend(LgnLbl{iDmn},'location','best')
+                        end
                     end
                 end
+                axes('position',[0.1300    0.1100    0.7750    0.8150]);
+                axis off
+                title(sprintf('%s|%s: Histograms of H&T parameter uncertainty',Mrg(iDmn+1).RspLbl,Mrg(1).RspLbl))
+                
+                savePics(fullfile(HT.FigureFolder,sprintf('Stg4_HT_3_Parameters_%s',Mrg(iDmn+1).RspLbl)))
             end
-            axes('position',[0.1300    0.1100    0.7750    0.8150]);
-            axis off
-            title(sprintf('%s|%s: Histograms of H&T parameter uncertainty',Mrg(2).RspLbl,Mrg(1).RspLbl))
-            
-            savePics(fullfile(HT.FigureFolder,'Stg4_HT_3_Parameters'))
             
             %% Threshold plot  (alpha as function of NEP)
-            figure;
-            clf;     
-            nPlt1=ceil(sqrt(HT.nAlp)); %max size nPlt x nPlt
-            nPlt2=ceil(HT.nAlp./nPlt1);
-            C=lines((HT.nDmn-1));
+            %Alpha varies by covariate bin, so to avoid over-crowded plots; have a different version of this plot for each dimension.    
+            nPlt1=ceil(sqrt(Mrg(1).Bn.nBin)); %max size nPlt x nPlt
+            nPlt2=ceil(Mrg(1).Bn.nBin./nPlt1);
+            
+ 
+            
             for iDmn = 1:(HT.nDmn-1)
+                figure;
+                clf;
                 for iAlp = 1:HT.nAlp
                     subplot(nPlt2,nPlt1,iAlp)
-                    plot(HT.NEP,squeeze(HT.Prm(iAlp,iDmn,:)),'.','color',C(iDmn,:),'markersize',20)
+                    plot(HT.NEP,squeeze(HT.Prm(iAlp,iDmn,:)),'k.','markersize',20)
                     tAlp=squeeze(HT.Prm(iAlp,iDmn,:));
                     
-                    if Mrg(1).nB>=20
+                    if Mrg(1).nBoot>=20
                         hold on
                         nNEP=10; %number of bins for threshold diagnostic plot
                         NEPEdg=linspace(min(HT.NEP),max(HT.NEP),nNEP+1);
@@ -709,13 +708,14 @@ classdef HeffernanTawn
                         Sub=accumarray(tA,tAlp,[nNEP,1],@(x)quantile(x,0.975),NaN);
                         
                         NanI=isnan(S);
-                        plot(NEPBin(~NanI),S(~NanI),'-','color',C(iDmn,:),'linewidth',2)
-                        plot(NEPBin(~NanI),Slb(~NanI),'--','color',C(iDmn,:),'linewidth',2)
-                        plot(NEPBin(~NanI),Sub(~NanI),'--','color',C(iDmn,:),'linewidth',2)
+                        plot(NEPBin(~NanI),S(~NanI),'r-','linewidth',2)
+                        plot(NEPBin(~NanI),Slb(~NanI),'r--','linewidth',2)
+                        plot(NEPBin(~NanI),Sub(~NanI),'r--','linewidth',2)
                     end
-                    
+                    grid on
+
                     if iAlp == 1
-                        xlabel('NEP')
+                        xlabel('HT NEP')
                         ylabel('\alpha')
                         if HT.nAlp==1 %stationary case
                             title(sprintf('%s|%s: H&T parameter stability by threshold',Mrg(iDmn+1).RspLbl,Mrg(1).RspLbl))
@@ -726,19 +726,20 @@ classdef HeffernanTawn
                         title(sprintf('Bin %s',Mrg(1).Bn.BinLbl{iAlp}))
                     end
                 end
+                hold off;
+                savePics(fullfile(HT.FigureFolder,sprintf('Stg4_HT_4_AlphaThresholdStability_%s',Mrg(iDmn+1).RspLbl)))
             end
-            hold off;
-            savePics(fullfile(HT.FigureFolder,'Stg4_HT_4_AlphaThresholdStability'))
+           
                
             %% Threshold plot (beta as function of NEP)
-            figure; clf;            
-            nPlt1=ceil(sqrt(HT.nDmn-1)); %max size nPlt x nPlt
-            nPlt2=ceil(HT.nDmn-1./nPlt1);
+            figure; clf;            %All dimensions on one plot: beta is stationary so don't have subplots for covariate bins
+            nPlt1=ceil(sqrt(HT.nDmn-1)); 
+            nPlt2=ceil((HT.nDmn-1)./nPlt1);
             for iDmn = 1:(HT.nDmn-1)
                 subplot(nPlt2,nPlt1,iDmn);
                 plot(HT.NEP,squeeze(HT.Prm(HT.nAlp+1,iDmn,:)),'k.','markersize',20)
                 tBet=squeeze(HT.Prm(HT.nAlp+1,iDmn,:));
-                if Mrg(1).nB>20
+                if Mrg(1).nBoot>20
                     hold on
                     nNEP=10;
                     NEPEdg=linspace(min(HT.NEP),max(HT.NEP),nNEP+1);
@@ -753,10 +754,10 @@ classdef HeffernanTawn
                     plot(NEPBin(n>0),Slb(n>0),'r--','linewidth',2)
                     plot(NEPBin(n>0),Sub(n>0),'r--','linewidth',2)
                 end
-                xlabel('NEP')
+                grid on
+                xlabel('HT NEP')
                 ylabel('\beta')
                 title(sprintf('%s|%s: H&T parameter stability by threshold',Mrg(iDmn+1).RspLbl,Mrg(1).RspLbl))
-                ylim([-1,1])
             end
             
             savePics(fullfile(HT.FigureFolder,'Stg4_HT_4_BetaThresholdStability'))
@@ -765,25 +766,27 @@ classdef HeffernanTawn
             if HT.nAlp>1
                 figure;
                 clf;
-                if HT.nB>1 && HT.CVMth==1
-                   plot(HT.SmthSet,nanmedian(HT.CVLackOfFit,2),'k-','linewidth',2) 
+                if HT.nBoot>1 && HT.CVMth==1
+                   plot(log10(HT.SmthSet),nanmedian(HT.CVLackOfFit,2),'k-','linewidth',2) 
                    hold on
-                   plot(HT.SmthSet,quantile(HT.CVLackOfFit,0.025,2),'k--','linewidth',2) 
-                   plot(HT.SmthSet,quantile(HT.CVLackOfFit,0.975,2),'k--','linewidth',2) 
+                   plot(log10(HT.SmthSet),quantile(HT.CVLackOfFit,0.025,2),'k--','linewidth',2) 
+                   plot(log10(HT.SmthSet),quantile(HT.CVLackOfFit,0.975,2),'k--','linewidth',2) 
                 else
-                   plot(HT.SmthSet,HT.CVLackOfFit(:,1),'k-','linewidth',2)
+                   plot(log10(HT.SmthSet),HT.CVLackOfFit(:,1),'k-','linewidth',2)
                 end                
                 axis tight
                 hold on
-                plot(median(HT.OptSmth)*[1,1],ylim,'r--','linewidth',2)
+                grid on
+                plot(log10(median(HT.OptSmth))*[1,1],ylim,'r--','linewidth',2)
                 ylabel('Lack of fit')
-                xlabel('\lambda')
-                set(gca,'xscale','log');
+                xlabel('$\log_{10}(\tilde{\lambda)}$','Interpreter','latex')              
                 title(sprintf('HT cross-validation lack of fit'))  
                 savePics(fullfile(HT.FigureFolder,'Stg4_HT_5_SectorGoodnessOfFit'))
             end
             
-            
+            %% Cond. RV CDFs
+            ColMat=hsv(HT.nBin);
+
             figure;
             clf;
             c=0;
@@ -792,32 +795,38 @@ classdef HeffernanTawn
                     c=c+1;
                     
                     subplot(HT.nDmn-1,HT.nRtr,c)
-                    if HT.nBin<16
-                        try %sort changed in recent verison of Matlab but not sure which
+                    grid on
+                    % Per bin: -----------
+                    if HT.nBin<16  & HT.nBin > 1  %plot directional CDFs when there are no more than 15 bins
+                        try %sort() different in matlab versions 
                             tX=sort(permute(HT.RV.Y(1:HT.nBin,iDmn-1,:,iRtr),[1,3,2]),2,'MissingPlacement','first');
                         catch
                             tX=sort(permute(HT.RV.Y(1:HT.nBin,iDmn-1,:,iRtr),[1,3,2]),2);
                         end
-                        plot(tX,linspace(0,1,HT.RV.nRls),'linewidth',2)
+                        for iBin = 1:HT.nBin
+                            plot(tX(iBin,:),linspace(0,1,HT.RV.nRls),'linewidth',2,'color',ColMat(iBin,:))
+                            hold on
+                        end
                     end
-                    hold on
+                    
+                    %Omni: --------------
                     try
                         tX=sort(permute(HT.RV.Y(end,iDmn-1,:,iRtr),[1,3,2]),2,'MissingPlacement','first');
                     catch
                         tX=sort(permute(HT.RV.Y(end,iDmn-1,:,iRtr),[1,3,2]),2);
                     end
-                    plot(tX,linspace(0,1,HT.RV.nRls),'--k','linewidth',2)
+                    if HT.nBin == 1
+                        plot(tX,linspace(0,1,HT.RV.nRls),'k-','linewidth',2)
+                    else
+                        plot(tX,linspace(0,1,HT.RV.nRls),'--k','linewidth',2)
+                    end
                     
-                    % hold on
-                    % plot(xlim,[0.5,0.5],'--k')
-                    % plot(xlim,[exp(-1),exp(-1)],'--k')
                     ylabel('Cumulative Probability')
                     xlabel(sprintf('%s | %s',Mrg(iDmn).RspLbl, Mrg(1).RspLbl))
+                    grid on
                     
-                    if HT.nBin<16
+                    if (HT.nBin<16  & HT.nBin >1 ) & (c == (HT.nDmn-1)*HT.nRtr)
                         legend([Mrg(1).Bn.BinLbl(:);'Omni'],'location','best');
-                    else
-                        legend('Omni','location','best');
                     end
                     
                     if iDmn==2
@@ -825,7 +834,7 @@ classdef HeffernanTawn
                     end
                 end                               
             end
-             savePics(fullfile(HT.FigureFolder,'Stg4_HT_6_ConditionalReturnValueCDF'))
+            savePics(fullfile(HT.FigureFolder,'Stg4_HT_6_ConditionalReturnValueCDF'))
         end %plot
         
     end %methods
@@ -849,6 +858,9 @@ classdef HeffernanTawn
             tY=HT.Y(IExc,:,iBt);  %conditioning value given exceedance in conditioned value
             if HT.NonStat %bin allocation
                 tA=HT.A(IExc,iBt);
+                if sum(isnan(tA))>0
+                   warning('NaNs in allocation') 
+                end
             else
                 tA=ones(nExc,1);
             end             
@@ -892,7 +904,7 @@ classdef HeffernanTawn
                 HT.OptSmth(iBt)=HT.SmthSet(tI)';                 
             end
             
-            %% fit model: find optimal parameter values for heffernana and tawn model         
+            %% fit model: find optimal parameter values for heffernan and tawn model         
             if HT.TwoParamFlag %2 parameter HT
                 tHTPrm=fminsearch(@(p)HeffernanTawn.likelihood(tX,tY,tA,p,HT.MarginType,HT.OptSmth(iBt),HT.TwoParamFlag),p0(1:2),opts);
                 tHTPrm=[tHTPrm;zeros(HT.nDmn-1,1)';ones(nDmin-1,1)'];
@@ -915,15 +927,8 @@ classdef HeffernanTawn
         
     end %Methods private
     methods(Static)
-        function [UL,LL,Rng] = makeRange(Sml,Mrg,nRls)
-            % makeRange: generate upper and lower bounds and range for
-            % importance sampler
-            % (created so that it can be overloaded in the CEVA case)
-            
-            UL = Mrg(iDmn).INV((1-1e-6).*ones(nRls,1),Sml.I,Sml.A);
-            LL = Mrg(iDmn).GmmLct(Sml.A);
-            Rng = (UL-LL);
-        end % makeRange
+
+       
         
         function PLOGL=likelihood(X,Y,A,p,MrgTp,L,TwoPrmFlg)
             %function PLOGL=likelihood(X,Y,A,p,MrgTp,L,TwoPrmFlg)
@@ -982,7 +987,7 @@ classdef HeffernanTawn
                        
             NLOGL=sum(sum(0.5*((Y-bsxfun(@times,Al,X)-bsxfun(@times,M,Xb)).^2./(Std).^2)+log(Std)));
                          
-            PLOGL=NLOGL+L.*sum((Alp(:)-mean(Alp(:))).^2);     %Penalised Likelhiood
+            PLOGL=NLOGL+L.*sum(sum((Alp-mean(Alp,1)).^2,1),2);     %Penalised Likelhiood
         end %likelihood
         
          
