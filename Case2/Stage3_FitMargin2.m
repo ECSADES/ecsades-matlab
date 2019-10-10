@@ -1,5 +1,5 @@
 clear; clc; close all;
-addpath('..\Code');
+addpath('PPC\Code');
 %% Stage3_FitMarginal Generalised Pareto
 % Fit Piecewise constant extreme value model for margin / dimension 'iDmn'
 % 

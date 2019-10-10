@@ -1,5 +1,5 @@
 clear; clc; close all;
-addpath('..\Code');
+addpath('PPC\Code');
 %% Stage2_BinData
 % Choose covariate bins
 
