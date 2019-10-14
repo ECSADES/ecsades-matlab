@@ -1,5 +1,5 @@
 clear; clc; close all;
-addpath('PPC\Code');
+addpath('..\Code');
 %% Stage4_FitH&T
 
 FM=cellstr(ls('Output/MM*.mat'));

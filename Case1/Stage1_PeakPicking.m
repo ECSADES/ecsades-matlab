@@ -1,10 +1,10 @@
 clear; clc; close all;
-addpath('PPC\Code');
+addpath('..\Code');
 
 %% Stage 1: Peak-picking
 % Extract peaks data 
 
-load('PPC\CNS_mo_response')
+load('..\CNS_mo_response')
 
 %% Parameters
 RspLbl={'Hs','Tp'}; %main and associated variable labels

@@ -1,6 +1,6 @@
 clear; clc; close all;
 
-addpath('PPC\Code');
+addpath('..\Code');
 %% Stage5_Contour
 %%%%%%%%%%%%%%%%%%%%%%%%%
 %load marginal model

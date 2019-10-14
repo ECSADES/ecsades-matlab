@@ -1,5 +1,5 @@
 clear; clc; close all;
-addpath('R:\Emma.Ross\Extremes\Devel_Code\CE\Code');
+addpath('..\Code');
 %% Stage2_BinData
 % Choose covariate bins
 
